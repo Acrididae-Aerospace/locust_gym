@@ -1,2 +1,0 @@
-jsbsim
-git+https://github.com/Gor-Ren/gym-jsbsim
