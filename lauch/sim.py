@@ -20,9 +20,9 @@ wandb.init(
 
 
 def train_model(
-    timesteps=10000000,
-    save_path="final_models/ppo_quad_pole_balance_final",
-    checkpoint_interval=50000,
+    timesteps=1000000000,
+    save_path="./final_models/ppo_quad_pole_balance_final",
+    checkpoint_interval=10000,
 ):
     """
     Trains PPO on the PyFlyt QuadX-Pole-Balance environment with periodic checkpoints.
@@ -42,7 +42,7 @@ def train_model(
     # Setup checkpoint callback
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_interval,
-        save_path="checkpoints/",
+        save_path="./checkpoints/",
         name_prefix="ppo_quad_pole_balance_steps",
         save_replay_buffer=False,
         save_vecnormalize=True,
@@ -83,9 +83,9 @@ def test_model(load_path="ppo_quad_pole_balance", num_episodes=50):
 
 if __name__ == "__main__":
     # Train with checkpoints every 50,000 steps
-    train_model(timesteps=1000000, checkpoint_interval=50000)
+    # train_model(timesteps=1000000000, checkpoint_interval=50000)
     # Test model
-    # test_model("checkpoints/ppo_quad_pole_balance_steps_500000_steps") # Test a specific checkpoint
+    test_model("./checkpoints/ppo_quad_pole_balance_steps_5400000_steps") # Test a specific checkpoint
     # test_model("final_models/ppo_quad_pole_balance_final")  # Test final model
     # Close WandB
     wandb.finish()
