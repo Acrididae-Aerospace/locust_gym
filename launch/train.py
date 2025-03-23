@@ -26,13 +26,13 @@ def train_model(
     checkpoint_interval=10000,
 ):
     """
-    Trains PPO on the PyFlyt QuadX-Pole-Balance environment with periodic checkpoints.
+    Trains PPO on the PyFlyt fixed wing launch env with periodic checkpoints.
     Args:
         timesteps: Total timesteps for training
         save_path: Path to save the final model
         checkpoint_interval: Frequency (in timesteps) for saving model checkpoints
     """
-    train_env = make_vec_env("PyFlyt/QuadX-Pole-Balance-v4", n_envs=4)
+    train_env = make_vec_env("Launch/Drone-launch-v0", n_envs=4)
     model = PPO(
         "MlpPolicy",
         train_env,
