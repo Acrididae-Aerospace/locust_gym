@@ -312,7 +312,7 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         self.info["is_level_flight"] = is_level
 
         # Calculate reward components
-        altitude_reward = -0.01 * altitude_error
+        altitude_reward = -0.1 * altitude_error
 
         # If drone is high enough, reward level flight
         if current_altitude >= self.target_altitude:
@@ -336,15 +336,14 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
             self.info["level_flight_time"] = 0
             level_flight_reward = 0.0
 
-        # Velocity rewards to encourage moving forward
-        velocity_reward = 0.1 * np.linalg.norm(lin_vel)
+        time_reward = -1 # Punish time in flight, aim to be done asap
 
         # Combine rewards
-        self.reward = altitude_reward + level_flight_reward + velocity_reward
+        self.reward = altitude_reward + level_flight_reward + time_reward
 
         # Check for successful completion
         if self.time_at_level_flight >= self.level_flight_duration:
-            self.reward += 200.0  # Large bonus for completing the task
+            self.reward += 1000.0  # Large bonus for completing the task
             self.termination = True
             self.info["completed_task"] = True
             self.info["env_complete"] = True
