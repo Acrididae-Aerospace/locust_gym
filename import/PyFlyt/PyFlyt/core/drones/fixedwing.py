@@ -25,13 +25,13 @@ class Fixedwing(DroneClass):
         drone_model: str = "fixedwing",
         model_dir: None | str = None,
         np_random: None | np.random.Generator = None,
-        use_camera: bool = False,
+        use_camera: bool = True,
         use_gimbal: bool = False,
-        camera_angle_degrees: int = 0,
-        camera_FOV_degrees: int = 90,
+        camera_angle_degrees: int = 30,
+        camera_FOV_degrees: int = 110,
         camera_resolution: tuple[int, int] = (128, 128),
         camera_position_offset: np.ndarray = np.array([-3.0, 0.0, 1.0]),
-        camera_fps: None | int = None,
+        camera_fps: int = 30,
         starting_velocity: np.ndarray = np.array([20.0, 0.0, 0.0]),
     ):
         """Creates a Fixedwing UAV and handles all relevant control and physics.

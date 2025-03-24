@@ -35,7 +35,7 @@ def train_model(
     """
     train_env = make_vec_env("Launch/Drone-launch-v0", n_envs=4)
     model = PPO(
-        "MlpPolicy",
+        "MultiInputPolicy",
         train_env,
         verbose=1,
         tensorboard_log="./ppo_tensorboard/",
@@ -62,4 +62,4 @@ def train_model(
 
 if __name__ == "__main__":
     # Train with checkpoints every 50,000 steps
-    train_model(timesteps=1000000000, checkpoint_interval=50000)
+    train_model(timesteps=1000000000, checkpoint_interval=5000)

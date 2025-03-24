@@ -1,5 +1,5 @@
 import gymnasium as gym
-import PyFlyt.gym_envs
+import custom_gyms.gym_envs
 from stable_baselines3 import PPO
 import os
 import argparse
@@ -20,7 +20,7 @@ def test_model(load_path, num_episodes=50):
             return False
 
         model = PPO.load(load_path, device="cpu")
-        test_env = gym.make("PyFlyt/QuadX-Pole-Balance-v4", render_mode="human")
+        test_env = gym.make("Launch/Drone-launch-v0", render_mode="human")
 
         print(f"\nTesting model: {load_path}")
         print(f"Running for {num_episodes} episodes...\n")
