@@ -45,7 +45,7 @@ def train_model(
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_interval,
         save_path="./checkpoints/",
-        name_prefix="ppo_quad_pole_balance_steps",
+        name_prefix="ppo_drone-launch",
         save_replay_buffer=False,
         save_vecnormalize=True,
     )

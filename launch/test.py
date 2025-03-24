@@ -33,6 +33,8 @@ def test_model(load_path, num_episodes=50):
 
             while not done:
                 action, _states = model.predict(obs, deterministic=True)
+                # print(obs)
+                # print(action)
                 obs, reward, terminated, truncated, _ = test_env.step(action)
                 episode_reward += reward
                 done = terminated or truncated

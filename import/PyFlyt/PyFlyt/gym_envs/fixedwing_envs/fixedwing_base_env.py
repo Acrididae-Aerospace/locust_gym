@@ -24,7 +24,7 @@ class FixedwingBaseEnv(gymnasium.Env):
         start_orn: np.ndarray = np.array([[0.0, 0.0, 0.0]]),
         flight_mode: int = 0,
         flight_dome_size: float = np.inf,
-        max_duration_seconds: float = 10.0,
+        max_duration_seconds: float = 15.0,
         angle_representation: Literal["euler", "quaternion"] = "quaternion",
         agent_hz: int = 30,
         render_mode: None | Literal["human", "rgb_array"] = None,
@@ -213,6 +213,13 @@ class FixedwingBaseEnv(gymnasium.Env):
         ang_pos = raw_state[1]
         lin_vel = raw_state[2]
         lin_pos = raw_state[3]
+        
+        self.env.resetDebugVisualizerCamera(
+            cameraDistance=5,
+            cameraYaw=30,
+            cameraPitch=-30,
+            cameraTargetPosition=[lin_pos[0], lin_pos[1], lin_pos[2]],
+        )
 
         # quaternion angles
         quaternion = p.getQuaternionFromEuler(ang_pos)
@@ -236,7 +243,7 @@ class FixedwingBaseEnv(gymnasium.Env):
             self.termination |= True
 
         # exceed flight dome  or y < 0
-        if np.linalg.norm(self.env.state(0)[-1]) > self.flight_dome_size or self.env.state(0)[3][1] < 0:
+        if np.linalg.norm(self.env.state(0)[-1]) > self.flight_dome_size or self.env.state(0)[3][2] < 0:
             self.reward = -500.0
             self.info["out_of_bounds"] = True
             self.termination |= True

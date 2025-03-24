@@ -46,16 +46,16 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
     def __init__(
         self,
         target_altitude: float = 60.96,  # in meters
-        level_flight_duration: float = 5.0,
-        min_starting_height: float = 0.5,
-        max_starting_height: float = 15.24, # in meters
+        level_flight_duration: float = 2.0,
+        min_starting_height: float = 2,
+        max_starting_height: float =  2.5, #15.24, # in meters
         min_starting_velocity: float = 8.0,
         max_starting_velocity: float = 18.0,
-        min_ground_angle: float = 125.0,
+        min_ground_angle: float = 215.0,
         max_ground_angle: float = 270.0,
         min_air_angle: float = 180,
         max_air_angle: float = 270.0,
-        altitude_angle_threshold: float = 1,  # in meters
+        altitude_angle_threshold: float = 100,  # in meters not used rn
         min_roll_angle: float = 0.0,
         max_roll_angle: float = 360.0,
         level_roll_threshold: float = 5.0,
@@ -148,9 +148,9 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
             # Interpolate from ground angle to air angle
             min_pitch = min_angle * (1 - t) + min_air * t
             max_pitch = max_angle * (1 - t) + max_air * t
-        else:
-            min_pitch = np.radians(self.min_air_angle)
-            max_pitch = np.radians(self.max_air_angle)
+        else: # only ground
+            min_pitch = np.radians(self.min_ground_angle)
+            max_pitch = np.radians(self.max_ground_angle)
 
         pitch_angle = self.np_random.uniform(min_pitch, max_pitch)
 
@@ -278,72 +278,86 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
 
         self.state = new_state
 
-    def is_level_flight(self, ang_pos, ang_vel) -> bool:
-        """Check if the current flight is level."""
+    def compute_term_trunc_reward(self) -> None:
+        """Compute termination conditions, truncation, and continuous rewards."""
+        super().compute_base_term_trunc_reward()
+
+        # Get current state information
+        ang_vel, ang_pos, _, lin_pos, _ = super().compute_attitude()
+
+        # Altitude
+        current_altitude = lin_pos[2]
+        altitude_error = abs(current_altitude - self.target_altitude)
+
+        # Altitude reward with smoother scaling
+        altitude_reward = 0
+        if current_altitude < self.target_altitude:
+            # Gradually increase reward as it approaches target altitude
+            altitude_reward = 10 * (current_altitude / self.target_altitude)
+        elif current_altitude > self.target_altitude + 1:
+            # Increasingly negative reward for being too high
+            altitude_reward = -5 * (altitude_error / self.target_altitude)
+        else: # in window
+            altitude_reward = 15
+
+        # Continuous levelness reward
         # Extract roll, pitch from euler angles
         roll, pitch, _ = ang_pos
         _, _, yaw_rate = ang_vel
 
-        # Convert to degrees for threshold comparison
+        # Convert to degrees for more intuitive scaling
         roll_deg = np.degrees(roll)
         pitch_deg = np.degrees(pitch)
 
-        # Check if within thresholds
-        is_roll_level = abs(roll_deg) < self.level_roll_threshold
-        is_pitch_level = abs(pitch_deg) < self.level_pitch_threshold
-        is_yaw_stable = abs(yaw_rate) < self.level_yaw_rate_threshold
+        # Compute levelness as a continuous score
+        # Lower deviation from zero means more level
+        roll_levelness = 1 - min(1, abs(roll_deg - 180) / self.level_roll_threshold)
+        pitch_levelness = 1 - min(1, abs(pitch_deg - 180) / self.level_pitch_threshold)
+        yaw_stability = 1 - min(1, abs(yaw_rate) / self.level_yaw_rate_threshold)
 
-        return is_roll_level and is_pitch_level and is_yaw_stable
+        # Combined levelness score with some weighting
+        levelness_reward = 10 * (roll_levelness * pitch_levelness * yaw_stability)
 
-    def compute_term_trunc_reward(self) -> None:
-        """Compute termination conditions, truncation, and rewards."""
-        super().compute_base_term_trunc_reward()
+        # Time penalty with exponential increase
+        time_penalty = -0.01 * (1 + self.step_count / self.max_steps)
 
-        # Get current state information
-        ang_vel, ang_pos, lin_vel, lin_pos, _ = super().compute_attitude()
-        current_altitude = lin_pos[2]
-        altitude_error = abs(self.target_altitude - current_altitude)
-
-        # Update info about altitude
-        self.info["reached_target_altitude"] = current_altitude >= self.target_altitude
-
-        # Check if level flight is achieved
-        is_level = self.is_level_flight(ang_pos, ang_vel)
-        self.info["is_level_flight"] = is_level
-
-        # Calculate reward components
-        altitude_reward = -0.1 * altitude_error
-
-        # If drone is high enough, reward level flight
-        if current_altitude >= self.target_altitude:
-            if is_level:
-                # Add time to level flight counter
-                self.time_at_level_flight += self.time_per_step
-                self.info["level_flight_time"] = self.time_at_level_flight
-
-                # Bonus for maintaining level flight
-                level_flight_reward = 5.0
-            else:
-                # Reset the counter if not level
-                self.time_at_level_flight = 0
-                self.info["level_flight_time"] = 0
-
-                # Small penalty for not being level when at altitude
-                level_flight_reward = -1.0
+        # Distance penalty
+        # Calculate horizontal distance from origin (x, y)
+        horizontal_dist = np.linalg.norm(lin_pos[:2])
+        
+        # Distance penalty
+        if horizontal_dist <= 50:
+            distance_penalty = 0
         else:
-            # No level flight tracking below target altitude
-            self.time_at_level_flight = 0
-            self.info["level_flight_time"] = 0
-            level_flight_reward = 0.0
-
-        time_reward = -1 # Punish time in flight, aim to be done asap
+            # Squared error beyond 50m
+            distance_penalty = -((horizontal_dist - 50) ** 2) / 1000
 
         # Combine rewards
-        self.reward = altitude_reward + level_flight_reward + time_reward
+        self.reward = (
+            altitude_reward + 
+            levelness_reward + 
+            time_penalty + 
+            distance_penalty
+        )
+
+        # Update info dictionary
+        self.info["reached_target_altitude"] = current_altitude >= self.target_altitude
+        self.info["roll_levelness"] = roll_levelness
+        self.info["pitch_levelness"] = pitch_levelness
+        self.info["yaw_stability"] = yaw_stability
+        self.info["horizontal_distance"] = horizontal_dist
 
         # Check for successful completion
-        if self.time_at_level_flight >= self.level_flight_duration:
+        self.time_at_level_flight += self.time_per_step
+        if (current_altitude >= self.target_altitude and
+            roll_levelness > 0.9 and
+            pitch_levelness > 0.9 and
+            yaw_stability > 0.9 and
+            self.time_at_level_flight >= self.level_flight_duration):
             self.reward += 1000.0  # Large bonus for completing the task
             self.termination = True
             self.info["completed_task"] = True
             self.info["env_complete"] = True
+        else:
+            self.info["completed_task"] = False
+            self.info["env_complete"] = False
