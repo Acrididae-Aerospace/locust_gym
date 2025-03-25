@@ -1,12 +1,15 @@
 import gymnasium as gym
 import custom_gyms.gym_envs
+from helpers.print import DynamicTerminalTracker
 from stable_baselines3 import PPO
 import os
 import argparse
 import sys
-
+import pprint
 
 def test_model(load_path, num_episodes=50):
+    # Init
+    tracker = DynamicTerminalTracker()
     """
     Tests the trained PPO model with rendering for multiple episodes.
 
@@ -35,7 +38,8 @@ def test_model(load_path, num_episodes=50):
                 action, _states = model.predict(obs, deterministic=True)
                 # print(obs)
                 # print(action)
-                obs, reward, terminated, truncated, _ = test_env.step(action)
+                obs, reward, terminated, truncated, info = test_env.step(action)
+                tracker.display(info, reward)
                 episode_reward += reward
                 done = terminated or truncated
                 steps += 1

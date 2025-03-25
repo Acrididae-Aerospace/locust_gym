@@ -31,7 +31,7 @@ class Fixedwing(DroneClass):
         camera_FOV_degrees: int = 110,
         camera_resolution: tuple[int, int] = (128, 128),
         camera_position_offset: np.ndarray = np.array([-3.0, 0.0, 1.0]),
-        camera_fps: int = 30,
+        camera_fps: None | int = None,
         starting_velocity: np.ndarray = np.array([20.0, 0.0, 0.0]),
     ):
         """Creates a Fixedwing UAV and handles all relevant control and physics.
