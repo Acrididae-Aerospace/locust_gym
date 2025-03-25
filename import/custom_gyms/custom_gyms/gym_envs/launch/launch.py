@@ -282,89 +282,83 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
 
     def compute_term_trunc_reward(self) -> None:
         """
-        Compute advanced reward function for fixed-wing aircraft stability and goal achievement.
-
-        Specifically tuned for fixed-wing dynamics with 180-degree level reference.
+        Compute an advanced reward function for fixed-wing aircraft stability and goal achievement.
+        
+        Revised version:
+        - Uses a linear altitude progress reward with a high one-time bonus upon reaching the target.
+        - Employs quadratic (piecewise) rewards for level orientation.
+        - Softens the angular stability term.
+        - Uses adjusted penalties for horizontal distance and elapsed time.
         """
+        # Call base reward computation (if needed)
         super().compute_base_term_trunc_reward()
 
-        # Get current state information
+        # Retrieve current state information
         ang_vel, ang_pos, _, lin_pos, _ = super().compute_attitude()
-
-        # Altitude calculation
         current_altitude = lin_pos[2]
         altitude_error = abs(current_altitude - self.target_altitude)
 
-        # Fixed-wing specific upright orientation reward
+        # Altitude Reward: encourage progress toward target altitude.
+        # Here, progress_ratio goes from 0 (at ground level) to 1 (at target altitude)
+        progress_ratio = np.clip((self.target_altitude - altitude_error) / self.target_altitude, 0, 1)
+        altitude_reward = 30 * progress_ratio  # reward between 0 and 20
+
+        # One-time bonus for reaching or exceeding target altitude
+        if current_altitude >= self.target_altitude and not self.info["reached_target_altitude"]:
+            altitude_bonus = 1000.0  # increased bonus for reaching target
+            altitude_reward += altitude_bonus
+            self.info["reached_target_altitude"] = True
+
+        # Orientation Reward: encourage level flight (assumed level at 180°)
         roll, pitch, yaw = ang_pos
         roll_deg = np.degrees(roll)
         pitch_deg = np.degrees(pitch)
-
-        # Orientation reward for 180 degrees (level flight)
-        # Tighter Gaussian around 180 degrees with lower standard deviation
-        upright_roll_reward = np.exp(-((roll_deg - 180) ** 2) / (2 * (5**2)))
-        upright_pitch_reward = np.exp(-((pitch_deg - 180) ** 2) / (2 * (5**2)))
-
-        # Harsh penalty for significant deviation from level
-        roll_deviation_penalty = -((abs(roll_deg - 180) / 10) ** 2)
-        pitch_deviation_penalty = -((abs(pitch_deg - 180) / 10) ** 2)
-
-        # Angular velocity stability
+        # Compute errors relative to the ideal (180°)
+        roll_error = roll_deg - 180
+        pitch_error = pitch_deg - 180
+        # Quadratic penalty yields a high reward when error is small
+        upright_roll_reward = max(0, 10 - 0.05 * (roll_error ** 2))
+        upright_pitch_reward = max(0, 10 - 0.05 * (pitch_error ** 2))
+        
+        # Angular Stability Reward: use a softer exponential (wider variance)
         roll_rate, pitch_rate, yaw_rate = ang_vel
-        angular_stability_reward = np.exp(
-            -((roll_rate**2 + pitch_rate**2 + yaw_rate**2) / (2 * (0.1**2)))
-        )
-
-        # Incremental stability tracking
-        if (
-            upright_roll_reward > 0.95
-            and upright_pitch_reward > 0.95
-            and angular_stability_reward > 0.9
-        ):
+        angular_stability_reward = np.exp(-((roll_rate**2 + pitch_rate**2 + yaw_rate**2) / (2 * (0.2**2))))
+        
+        # Incremental Stability Tracking: bonus for maintaining stability over consecutive frames
+        if (upright_roll_reward > 8 and upright_pitch_reward > 8 and angular_stability_reward > 0.85):
             self.consecutive_stable_frames += 1
-            stability_progression_reward = 20 * (
-                1 - np.exp(-0.3 * self.consecutive_stable_frames)
-            )
+            stability_progression_reward = 10 * (1 - np.exp(-0.2 * self.consecutive_stable_frames))
         else:
             self.consecutive_stable_frames = 0
             stability_progression_reward = 0
 
-        # Altitude reward with smoother progression
-        altitude_reward = (
-            10 * (1 - np.exp(-0.1 * current_altitude))
-            if current_altitude < self.target_altitude
-            else 10
-        )
-
-        # Horizontal positioning penalty
+        # Horizontal Positioning Penalty: logarithmic penalty with adjusted scaling
         horizontal_dist = np.linalg.norm(lin_pos[:2])
-        distance_penalty = -np.log1p(horizontal_dist / 50)  # Softer penalty
+        distance_penalty = -np.log1p(horizontal_dist / 100)
 
-        # Time management
-        time_penalty = -0.05 * (self.step_count / self.max_steps)
+        # Time Penalty: reduce coefficient so as not to overly penalize longer stabilization times
+        time_penalty = -0.01 * (self.step_count / self.max_steps)
 
-        # Combine rewards with careful weighting
-        self.reward = (
-            altitude_reward
-            + 10 * upright_roll_reward
-            + 10 * upright_pitch_reward
-            + roll_deviation_penalty
-            + pitch_deviation_penalty
-            + 3 * angular_stability_reward
-            + stability_progression_reward
-            + distance_penalty
-            + time_penalty
+        # Combine reward components with balanced weighting
+        self.reward += (
+            altitude_reward +
+            upright_roll_reward +
+            upright_pitch_reward +
+            2 * angular_stability_reward +
+            stability_progression_reward +
+            distance_penalty +
+            time_penalty
         )
 
-        # Task completion conditions
-        if (
-            current_altitude >= self.target_altitude
-            and upright_roll_reward > 0.95
-            and upright_pitch_reward > 0.95
-            and angular_stability_reward > 0.9
-            and self.consecutive_stable_frames >= self.level_flight_duration
-        ):
-            self.reward += 1000.0  # Significant bonus for task completion
+        # Task Completion Condition:
+        # If target altitude is reached and orientation/stability are good for a sustained period,
+        # add a significant bonus and mark the episode as complete.
+        if (current_altitude >= self.target_altitude and
+            upright_roll_reward > 8 and
+            upright_pitch_reward > 8 and
+            angular_stability_reward > 0.85 and
+            self.consecutive_stable_frames >= self.level_flight_duration):
+            self.reward += 10000.0  # bonus for task completion
             self.termination = True
             self.info["completed_task"] = True
             self.info["env_complete"] = True
@@ -372,19 +366,17 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
             self.info["completed_task"] = False
             self.info["env_complete"] = False
 
-        # Update info dictionary with detailed metrics
-        self.info.update(
-            {
-                "roll_deg": roll_deg,
-                "pitch_deg": pitch_deg,
-                "upright_roll_reward": upright_roll_reward,
-                "upright_pitch_reward": upright_pitch_reward,
-                "roll_deviation_penalty": roll_deviation_penalty,
-                "pitch_deviation_penalty": pitch_deviation_penalty,
-                "angular_stability_reward": angular_stability_reward,
-                "stability_progression_reward": stability_progression_reward,
-                "consecutive_stable_frames": self.consecutive_stable_frames,
-                "current_altitude": current_altitude,
-                "horizontal_distance": horizontal_dist,
-            }
-        )
+        # Update diagnostic info for analysis
+        self.info.update({
+            "roll_deg": roll_deg,
+            "pitch_deg": pitch_deg,
+            "upright_roll_reward": upright_roll_reward,
+            "upright_pitch_reward": upright_pitch_reward,
+            "angular_stability_reward": angular_stability_reward,
+            "stability_progression_reward": stability_progression_reward,
+            "consecutive_stable_frames": self.consecutive_stable_frames,
+            "reached_target_altitude": self.info["reached_target_altitude"],
+            "current_altitude": current_altitude,
+            "horizontal_distance": horizontal_dist,
+            "altitude_reward": altitude_reward,
+        })

@@ -129,9 +129,9 @@ class PIDController:
         """
         # Extract current state
         current_state = self._extract_state(self._format_state(observation))
-        print(self.current_stage)
-        print(observation)
-        print(current_state)
+        # print(self.current_stage)
+        # print(observation)
+        # print(current_state)
         # Define target states
         target_roll = 0  # Level roll (0 degrees)
         target_altitude = 30  # Desired altitude (adjust as needed)

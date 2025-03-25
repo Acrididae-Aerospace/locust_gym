@@ -4,12 +4,17 @@ import os
 import argparse
 import sys
 import numpy as np
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(SCRIPT_DIR, "../"))
+from helpers.print import DynamicTerminalTracker
 
 # Import the PID controller from the previous artifact
 from pid_controller import create_pid_controller
 
 
 def test_pid_controller(controller, num_episodes=50):
+    # Init
+    tracker = DynamicTerminalTracker()
     """
     Tests the PID controller with rendering for multiple episodes.
 
@@ -35,10 +40,11 @@ def test_pid_controller(controller, num_episodes=50):
 
                 # Optional: Print observation and action for debugging
                 # print("Observation:", obs)
-                print("Action:", action)
+                # print("Action:", action)
 
                 # Step the environment
-                obs, reward, terminated, truncated, _ = test_env.step(action)
+                obs, reward, terminated, truncated, info = test_env.step(action)
+                tracker.display(info, reward)
                 episode_reward += reward
                 done = terminated or truncated
                 steps += 1
