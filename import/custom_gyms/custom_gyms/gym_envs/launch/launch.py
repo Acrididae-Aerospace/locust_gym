@@ -301,11 +301,11 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         # Altitude Reward: encourage progress toward target altitude.
         # Here, progress_ratio goes from 0 (at ground level) to 1 (at target altitude)
         progress_ratio = np.clip((self.target_altitude - altitude_error) / self.target_altitude, 0, 1)
-        altitude_reward = 30 * progress_ratio  # reward between 0 and 20
+        altitude_reward = 20 * progress_ratio  # reward between 0 and 20
 
         # One-time bonus for reaching or exceeding target altitude
         if current_altitude >= self.target_altitude and not self.info["reached_target_altitude"]:
-            altitude_bonus = 1000.0  # increased bonus for reaching target
+            altitude_bonus = 2000.0  # increased bonus for reaching target
             altitude_reward += altitude_bonus
             self.info["reached_target_altitude"] = True
 
@@ -317,17 +317,18 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         roll_error = roll_deg - 180
         pitch_error = pitch_deg - 180
         # Quadratic penalty yields a high reward when error is small
-        upright_roll_reward = max(0, 10 - 0.05 * (roll_error ** 2))
-        upright_pitch_reward = max(0, 10 - 0.05 * (pitch_error ** 2))
+        upright_roll_reward = max(0, 15 - 0.05 * (roll_error ** 2))
+        upright_pitch_reward = max(0, 15 - 0.05 * (pitch_error ** 2))
         
         # Angular Stability Reward: use a softer exponential (wider variance)
         roll_rate, pitch_rate, yaw_rate = ang_vel
         angular_stability_reward = np.exp(-((roll_rate**2 + pitch_rate**2 + yaw_rate**2) / (2 * (0.2**2))))
         
         # Incremental Stability Tracking: bonus for maintaining stability over consecutive frames
-        if (upright_roll_reward > 8 and upright_pitch_reward > 8 and angular_stability_reward > 0.85):
+        if (upright_roll_reward > 10 and upright_pitch_reward > 10 and angular_stability_reward > 0.7):
             self.consecutive_stable_frames += 1
-            stability_progression_reward = 10 * (1 - np.exp(-0.2 * self.consecutive_stable_frames))
+            self.info["level_flight_time"] = max(self.consecutive_stable_frames, self.info["level_flight_time"])
+            stability_progression_reward = 20 * (1 - np.exp(-0.2 * self.consecutive_stable_frames))
         else:
             self.consecutive_stable_frames = 0
             stability_progression_reward = 0
@@ -337,7 +338,7 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         distance_penalty = -np.log1p(horizontal_dist / 100)
 
         # Time Penalty: reduce coefficient so as not to overly penalize longer stabilization times
-        time_penalty = -0.01 * (self.step_count / self.max_steps)
+        time_penalty = -0.02 * (self.step_count / self.max_steps)
 
         # Combine reward components with balanced weighting
         self.reward += (
@@ -354,10 +355,10 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         # If target altitude is reached and orientation/stability are good for a sustained period,
         # add a significant bonus and mark the episode as complete.
         if (current_altitude >= self.target_altitude and
-            upright_roll_reward > 8 and
-            upright_pitch_reward > 8 and
-            angular_stability_reward > 0.85 and
-            self.consecutive_stable_frames >= self.level_flight_duration):
+            upright_roll_reward > 12 and
+            upright_pitch_reward > 12 and
+            angular_stability_reward > 0.8 and
+            self.consecutive_stable_frames >= self.level_flight_duration * self.agent_hz):
             self.reward += 10000.0  # bonus for task completion
             self.termination = True
             self.info["completed_task"] = True

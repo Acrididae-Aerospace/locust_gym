@@ -235,18 +235,19 @@ class FixedwingBaseEnv(gymnasium.Env):
         """compute_base_term_trunc_reward."""
         # exceed step count
         if self.step_count > self.max_steps:
+            self.reward += -500.0
             self.info["timed_out"] = True
             self.truncation |= True
 
-        # collision
-        if np.any(self.env.contact_array):
-            self.reward = -2500.0
+        # collision  or y < 0
+        if np.any(self.env.contact_array) or self.env.state(0)[3][2] < 0:
+            self.reward += -2500.0
             self.info["collision"] = True
             self.termination |= True
 
-        # exceed flight dome  or y < 0
-        if np.linalg.norm(self.env.state(0)[-1]) > self.flight_dome_size or self.env.state(0)[3][2] < 0:
-            self.reward = -2500.0
+        # exceed flight dome
+        if np.linalg.norm(self.env.state(0)[-1]) > self.flight_dome_size:
+            self.reward += -1500.0
             self.info["out_of_bounds"] = True
             self.termination |= True
 

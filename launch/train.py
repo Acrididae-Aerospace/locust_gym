@@ -94,8 +94,8 @@ wandb.init(
 
 
 def train_model(
-    timesteps=1000000000,
-    save_path="./final_models/ppo_quad_pole_balance_final",
+    timesteps=100000000000,
+    save_path="./final_models/ppo_drone_launch_final",
     checkpoint_interval=10000,
 ):
     """
