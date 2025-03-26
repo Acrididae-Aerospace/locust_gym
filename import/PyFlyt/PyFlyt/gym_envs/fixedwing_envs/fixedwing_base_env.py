@@ -232,24 +232,35 @@ class FixedwingBaseEnv(gymnasium.Env):
         raise NotImplementedError
 
     def compute_base_term_trunc_reward(self) -> None:
-        """compute_base_term_trunc_reward."""
-        # exceed step count
-        if self.step_count > self.max_steps:
-            self.reward += -500.0
+        """
+        A revised 'base' reward/penalty function with smaller negative values.
+        - Terminates/truncates the episode under certain conditions:
+            1. Exceeds max steps
+            2. Collision or y < 0
+            3. Out of flight dome
+        - Provides moderate penalties instead of very large ones.
+        """
+        # Exceed step count
+        if self.step_count >= self.max_steps:
+            # A moderate penalty for running out of time
+            self.reward -= 50.0
             self.info["timed_out"] = True
-            self.truncation |= True
+            self.truncation = True
 
-        # collision  or y < 0
+        # Collision or below ground
+        # (Here we assume self.env.state(0)[3][2] is the z-position of the drone's main body)
         if np.any(self.env.contact_array) or self.env.state(0)[3][2] < 0:
-            self.reward += -2500.0
+            # A moderate penalty for crashing
+            self.reward -= 200.0
             self.info["collision"] = True
-            self.termination |= True
+            self.termination = True
 
-        # exceed flight dome
+        # Exceed flight dome
         if np.linalg.norm(self.env.state(0)[-1]) > self.flight_dome_size:
-            self.reward += -1500.0
+            # A moderate penalty for leaving the flight area
+            self.reward -= 200.0
             self.info["out_of_bounds"] = True
-            self.termination |= True
+            self.termination = True
 
     def step(self, action: np.ndarray) -> tuple[Any, float, bool, bool, dict]:
         """Steps the environment.

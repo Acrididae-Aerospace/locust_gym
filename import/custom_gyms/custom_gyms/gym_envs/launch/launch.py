@@ -33,7 +33,7 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         max_roll_angle (float): maximum roll angle (degrees).
         level_roll_threshold (float): maximum roll angle considered level (degrees).
         level_pitch_threshold (float): maximum pitch angle considered level (degrees).
-        level_yaw_rate_threshold (float): maximum yaw rate considered level (rad/s).
+        level_angle_rate_threshold (float): maximum rate considered level (rad/s).
         flight_mode (int): The flight mode of the UAV.
         flight_dome_size (float): size of the allowable flying area.
         max_duration_seconds (float): maximum simulation time of the environment.
@@ -58,12 +58,12 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         altitude_angle_threshold: float = 100,  # in meters not used rn
         min_roll_angle: float = 0.0,
         max_roll_angle: float = 360.0,
-        level_roll_threshold: float = 5.0,
-        level_pitch_threshold: float = 5.0,
-        level_yaw_rate_threshold: float = 0.1,
+        level_roll_threshold: float = 10.0,
+        level_pitch_threshold: float = 10.0,
+        level_angle_rate_threshold: float = 0.2,
         flight_mode: int = 0,
-        flight_dome_size: float = 300.0,
-        max_duration_seconds: float = 120.0,
+        flight_dome_size: float = 150.0,
+        max_duration_seconds: float = 20.0,
         angle_representation: Literal["euler", "quaternion"] = "quaternion",
         agent_hz: int = 30,
         render_mode: None | Literal["human", "rgb_array"] = None,
@@ -88,6 +88,7 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         self.target_altitude = target_altitude
         self.level_flight_duration = level_flight_duration
         self.time_at_level_flight = 0.0
+        self.agent_hz = agent_hz
         self.time_per_step = 1.0 / agent_hz
 
         # Define starting condition parameters
@@ -106,7 +107,7 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         # Define what constitutes "level flight"
         self.level_roll_threshold = level_roll_threshold
         self.level_pitch_threshold = level_pitch_threshold
-        self.level_yaw_rate_threshold = level_yaw_rate_threshold
+        self.level_angle_rate_threshold = level_angle_rate_threshold
 
         # Store initial velocity for reset
         self.starting_velocity = None
@@ -224,7 +225,6 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
 
         # Initialize info dictionary
         self.info["level_flight_time"] = 0.0
-        self.info["is_level_flight"] = False
         self.info["reached_target_altitude"] = False
         self.info["completed_task"] = False
 
@@ -282,84 +282,117 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
 
     def compute_term_trunc_reward(self) -> None:
         """
-        Compute an advanced reward function for fixed-wing aircraft stability and goal achievement.
-        
-        Revised version:
-        - Uses a linear altitude progress reward with a high one-time bonus upon reaching the target.
-        - Employs quadratic (piecewise) rewards for level orientation.
-        - Softens the angular stability term.
-        - Uses adjusted penalties for horizontal distance and elapsed time.
+        A revised terminal/truncation reward function that uses smoother, 
+        potential-based shaping and moderate bonuses to encourage:
+        1. Climbing toward a target altitude.
+        2. Maintaining near-level orientation (roll/pitch).
+        3. Keeping angular rates small.
+        4. Staying alive longer instead of crashing quickly.
+        5. Providing a final moderate bonus if stable flight is achieved.
         """
-        # Call base reward computation (if needed)
+        # Always call the base reward logic (handles collisions, timeouts, etc.)
         super().compute_base_term_trunc_reward()
 
-        # Retrieve current state information
+        # If base logic already terminated or truncated the episode, don't proceed
+        if self.termination or self.truncation:
+            return
+
+        # Retrieve current state information from a helper
         ang_vel, ang_pos, _, lin_pos, _ = super().compute_attitude()
-        current_altitude = lin_pos[2]
-        altitude_error = abs(current_altitude - self.target_altitude)
-
-        # Altitude Reward: encourage progress toward target altitude.
-        # Here, progress_ratio goes from 0 (at ground level) to 1 (at target altitude)
-        progress_ratio = np.clip((self.target_altitude - altitude_error) / self.target_altitude, 0, 1)
-        altitude_reward = 20 * progress_ratio  # reward between 0 and 20
-
-        # One-time bonus for reaching or exceeding target altitude
-        if current_altitude >= self.target_altitude and not self.info["reached_target_altitude"]:
-            altitude_bonus = 2000.0  # increased bonus for reaching target
-            altitude_reward += altitude_bonus
-            self.info["reached_target_altitude"] = True
-
-        # Orientation Reward: encourage level flight (assumed level at 180°)
+        roll_rate, pitch_rate, yaw_rate = ang_vel
         roll, pitch, yaw = ang_pos
+        current_altitude = lin_pos[2]
+
+        # ----------------------------
+        # 1. Time-Alive Reward
+        # ----------------------------
+        # A small positive reward for every step the drone remains in flight.
+        # Helps discourage "crash early" policies.
+        time_alive_reward = 0.01
+
+        # ----------------------------
+        # 2. Altitude Shaping
+        # ----------------------------
+        # Encourage being close to target_altitude with a smooth exponential.
+        # This will be ~1.0 if at target altitude, and drop off as error grows.
+        altitude_error = abs(current_altitude - self.target_altitude)
+        altitude_shaping = np.exp(-0.1 * altitude_error)  # in range (0, 1]
+
+        # ----------------------------
+        # 3. Orientation Shaping
+        # ----------------------------
+        # Suppose "level" is near 180 deg roll & 180 deg pitch (from your original code).
         roll_deg = np.degrees(roll)
         pitch_deg = np.degrees(pitch)
-        # Compute errors relative to the ideal (180°)
-        roll_error = roll_deg - 180
-        pitch_error = pitch_deg - 180
-        # Quadratic penalty yields a high reward when error is small
-        upright_roll_reward = max(0, 15 - 0.05 * (roll_error ** 2))
-        upright_pitch_reward = max(0, 15 - 0.05 * (pitch_error ** 2))
-        
-        # Angular Stability Reward: use a softer exponential (wider variance)
-        roll_rate, pitch_rate, yaw_rate = ang_vel
-        angular_stability_reward = np.exp(-((roll_rate**2 + pitch_rate**2 + yaw_rate**2) / (2 * (0.2**2))))
-        
-        # Incremental Stability Tracking: bonus for maintaining stability over consecutive frames
-        if (upright_roll_reward > 10 and upright_pitch_reward > 10 and angular_stability_reward > 0.7):
+        # print(roll_deg)
+        roll_error = roll_deg
+        pitch_error = pitch_deg
+        # Exponential shaping that rewards small deviation from "level."
+        orientation_shaping = np.exp(-0.01 * (roll_error**2 + pitch_error**2))
+
+        # ----------------------------
+        # 4. Angular Rate Penalty
+        # ----------------------------
+        # Soft penalty for large angular velocities (roll_rate, pitch_rate, yaw_rate).
+        # Negative sign because large rates reduce the reward.
+        angular_rate_penalty = -0.1 * (roll_rate**2 + pitch_rate**2 + yaw_rate**2)
+
+        # ----------------------------
+        # 5. Consecutive Stability
+        # ----------------------------
+        # If the drone is "reasonably level" and "reasonably stable," increment
+        # a counter. Once it stays stable for a while, we give a final bonus.
+        # (Adjust thresholds to your preference.)
+        altitude_within_band = (abs(current_altitude - self.target_altitude) < 5.0)
+        stable_roll = abs(roll_error) < self.level_roll_threshold   # within 10 deg of 180
+        # print(roll_error)
+        stable_pitch = abs(pitch_error) < self.level_pitch_threshold
+        stable_rates = (abs(roll_rate) < self.level_angle_rate_threshold and
+                        abs(pitch_rate) < self.level_angle_rate_threshold and
+                        abs(yaw_rate)   < self.level_angle_rate_threshold)
+
+        if stable_roll and stable_pitch and stable_rates:
             self.consecutive_stable_frames += 1
-            self.info["level_flight_time"] = max(self.consecutive_stable_frames, self.info["level_flight_time"])
-            stability_progression_reward = 20 * (1 - np.exp(-0.2 * self.consecutive_stable_frames))
         else:
             self.consecutive_stable_frames = 0
-            stability_progression_reward = 0
 
-        # Horizontal Positioning Penalty: logarithmic penalty with adjusted scaling
-        horizontal_dist = np.linalg.norm(lin_pos[:2])
-        distance_penalty = -np.log1p(horizontal_dist / 100)
+        # A small incremental shaping for maintaining stability across frames
+        stability_progression_reward = 0.1 * self.consecutive_stable_frames
 
-        # Time Penalty: reduce coefficient so as not to overly penalize longer stabilization times
-        time_penalty = -0.02 * (self.step_count / self.max_steps)
-
-        # Combine reward components with balanced weighting
-        self.reward += (
-            altitude_reward +
-            upright_roll_reward +
-            upright_pitch_reward +
-            2 * angular_stability_reward +
-            stability_progression_reward +
-            distance_penalty +
-            time_penalty
+        # ----------------------------
+        # 6. Summation of Shaping Terms
+        # ----------------------------
+        # Add all shaping and penalties to the agent's reward. Keep magnitudes moderate.
+        step_reward = (
+            time_alive_reward
+            + altitude_shaping
         )
+        if(altitude_within_band):
+            step_reward += (
+                + orientation_shaping
+                + angular_rate_penalty
+                + stability_progression_reward
+            )
+        self.reward += step_reward
 
-        # Task Completion Condition:
-        # If target altitude is reached and orientation/stability are good for a sustained period,
-        # add a significant bonus and mark the episode as complete.
-        if (current_altitude >= self.target_altitude and
-            upright_roll_reward > 12 and
-            upright_pitch_reward > 12 and
-            angular_stability_reward > 0.8 and
-            self.consecutive_stable_frames >= self.level_flight_duration * self.agent_hz):
-            self.reward += 10000.0  # bonus for task completion
+        # ----------------------------
+        # 7. Check for "Successful Flight" Condition
+        # ----------------------------
+        # If altitude is within some band of the target and we've maintained
+        # stable orientation for enough frames, we consider the task completed.
+        # Give a moderate bonus and terminate.
+        # (Adjust thresholds as needed.)
+        stable_time_requirement = self.level_flight_duration / self.time_per_step
+
+        if altitude_within_band:
+            self.info["reached_target_altitude"] = True
+        self.info["level_flight_time"] = max(self.info["level_flight_time"], self.consecutive_stable_frames / self.agent_hz)
+
+        if altitude_within_band \
+        and stable_roll and stable_pitch and stable_rates \
+        and self.consecutive_stable_frames >= stable_time_requirement:
+            # Final moderate success bonus
+            self.reward += 10000.0
             self.termination = True
             self.info["completed_task"] = True
             self.info["env_complete"] = True
@@ -367,17 +400,27 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
             self.info["completed_task"] = False
             self.info["env_complete"] = False
 
-        # Update diagnostic info for analysis
+        # ----------------------------
+        # 8. Diagnostic Info
+        # ----------------------------
+        # You can log intermediate values for debugging/analysis
         self.info.update({
+            "altitude_error": altitude_error,
             "roll_deg": roll_deg,
             "pitch_deg": pitch_deg,
-            "upright_roll_reward": upright_roll_reward,
-            "upright_pitch_reward": upright_pitch_reward,
-            "angular_stability_reward": angular_stability_reward,
+            "roll_rate": roll_rate,
+            "pitch_rate": pitch_rate,
+            "yaw_rate": yaw_rate,
+            "altitude_shaping": altitude_shaping,
+            "orientation_shaping": orientation_shaping,
+            "angular_rate_penalty": angular_rate_penalty,
             "stability_progression_reward": stability_progression_reward,
+            "consecutive_stable_frames_target": stable_time_requirement,
             "consecutive_stable_frames": self.consecutive_stable_frames,
-            "reached_target_altitude": self.info["reached_target_altitude"],
-            "current_altitude": current_altitude,
-            "horizontal_distance": horizontal_dist,
-            "altitude_reward": altitude_reward,
+            "stable_roll": stable_roll,
+            "stable_pitch": stable_pitch,
+            "roll_rate": roll_rate,
+            "pitch_rate": pitch_rate,
+            "yaw_rate": yaw_rate,
+            "stable_rates": stable_rates,
         })
