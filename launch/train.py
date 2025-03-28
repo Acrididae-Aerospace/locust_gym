@@ -82,7 +82,7 @@ class DroneResultsCallback(BaseCallback):
 
 
 # Create checkpoints directory if it doesn't exist
-os.makedirs("checkpoints", exist_ok=True)
+os.makedirs("checkpoints_6", exist_ok=True)
 os.makedirs("final_models", exist_ok=True)
 
 wandb.init(
@@ -116,7 +116,7 @@ def train_model(
         # Setup checkpoint callback
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_interval,
-        save_path="./checkpoints/",
+        save_path="./checkpoints_6/",
         name_prefix="ppo_drone-launch",
         save_replay_buffer=False,
         save_vecnormalize=True,

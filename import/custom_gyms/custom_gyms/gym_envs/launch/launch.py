@@ -366,6 +366,9 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
         step_reward = (
             time_alive_reward
             + altitude_shaping
+            + orientation_shaping
+            + angular_rate_penalty
+            + stability_progression_reward
         )
         if(altitude_within_band):
             step_reward += (
@@ -373,6 +376,7 @@ class FixedwingLevelFlightEnv(FixedwingBaseEnv):
                 + angular_rate_penalty
                 + stability_progression_reward
             )
+            step_reward *= 2
         self.reward += step_reward
 
         # ----------------------------

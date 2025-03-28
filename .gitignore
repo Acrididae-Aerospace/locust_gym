@@ -2,6 +2,7 @@ locust_launch/
 wandb/
 ppo_tensorboard/
 */checkpoints/
+*/checkpoints_*/
 
 *.swp
 *.pyc
